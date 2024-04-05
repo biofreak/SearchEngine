@@ -1,0 +1,29 @@
+<!DOCTYPE hibernate-configuration PUBLIC
+        "-//Hibernate/Hibernate Configuration DTD 3.0//EN"
+        "http://www.hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+<hibernate-configuration>
+    <session-factory>
+        <!-- JDBC Database connection settings -->
+        <property name="connection.driver_class">com.mysql.cj.jdbc.Driver</property>
+        <property name="connection.datasource">java:comp/env/search_engine</property>
+        <!-- JDBC connection pool settings ... using built-in test pool -->
+        <property name="connection.pool_size">10</property>
+        <property name="hibernate.dialect.storage_engine">org.hibernate.dialect.InnoDBStorageEngine</property>
+        <!-- Echo the SQL to stdout -->
+        <property name="show_sql">true</property>
+        <!-- Set the current session context -->
+        <property name="current_session_context_class">thread</property>
+        <!-- Drop and re-create the database schema on startup -->
+        <property name="hibernate.hbm2ddl.auto">validate</property>
+        <property name="hibernate.flushMode">MANUAL</property>
+        <property name="hibernate.enable_lazy_load_no_trans">false</property>
+        <property name="naming.physical-strategy">
+            org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+        </property>
+
+        <mapping class="searchengine.model.Site" />
+        <mapping class="searchengine.model.Index" />
+        <mapping class="searchengine.model.Page" />
+        <mapping class="searchengine.model.Lemma" />
+    </session-factory>
+</hibernate-configuration>
