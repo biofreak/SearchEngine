@@ -5,10 +5,10 @@ spring:
   jackson:
     default-property-inclusion: non_null
   datasource:
+    username: root
+    password: "123456"
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: cupuyc
-    password: "password"
-    url: jdbc:mysql://spare.lan:3306/search_engine
+    url: jdbc:mysql://localhost:3306/search_engine
     name: search_engine
   jpa:
     open-in-view: false
