@@ -3,6 +3,7 @@ package searchengine.services;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.config.SitesList;
@@ -12,6 +13,8 @@ import searchengine.repositories.IndexRepository;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
+import searchengine.utils.SiteWalk;
+import searchengine.utils.SplitToLemmas;
 
 import java.io.IOException;
 import java.net.*;
@@ -41,14 +44,14 @@ public class IndexingServiceImpl implements IndexingService  {
     public IndexingResponse fullIndex() {
         IndexingResponse result = new IndexingResponse(true);
 
-        if (taskPool.getRunningThreadCount() == 0) {
+        if (!siteRepository.isIndexing()) {
             siteRepository.deleteAll();
 
-            sites.getSites().parallelStream().forEach(config -> {
+            sites.getSites().forEach(config -> {
                 String url = config.getUrl();
                 Site siteEntity = serializeSite(url, config.getName());
 
-                taskPool.submit(() -> {
+                TASKS.add(taskPool.submit(() -> {
                     try {
                         SiteWalk walkTask = new SiteWalk(new URI(url),
                                 getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
@@ -58,9 +61,8 @@ public class IndexingServiceImpl implements IndexingService  {
                     } catch (RuntimeException | URISyntaxException e) {
                         Optional.ofNullable(e.getCause()).ifPresent(x ->
                                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, x.getMessage()));
-                        throw new RuntimeException(e);
                     }
-                });
+                }));
             });
         } else {
             result.setResult(false);
@@ -75,10 +77,15 @@ public class IndexingServiceImpl implements IndexingService  {
         if (TASKS.isEmpty()) {
             response.setResult(false);
             response.setError(IndexError.NOTSTARTED.toString());
+        } else if(taskPool.isTerminating()) {
+            response.setResult(false);
+            response.setError(IndexError.TERMINATING.toString());
         } else {
             taskPool.shutdownNow();
             while(!taskPool.isTerminated()) {
-                TASKS.forEach(task -> task.completeExceptionally(new CancellationException()));
+                TASKS.forEach(task -> {
+                    task.completeExceptionally(new CancellationException(IndexError.INTERRUPTED.toString()));
+                });
             }
             TASKS.clear();
             taskPool = new ForkJoinPool();
@@ -87,7 +94,7 @@ public class IndexingServiceImpl implements IndexingService  {
         return response;
     }
 
-    private RecursiveAction formIndexTask(Site siteEntity, Page pageEntity, Map.Entry<String,Long> entry) {
+    private RecursiveAction indexTask(Site siteEntity, Page pageEntity, Map.Entry<String,Long> entry) {
        return  new RecursiveAction() {
             @Override
             protected void compute() {
@@ -97,26 +104,29 @@ public class IndexingServiceImpl implements IndexingService  {
         };
     }
 
-    private RecursiveAction formPageTask(Site siteEntity, URI url) {
+    private RecursiveAction pageTask(Site siteEntity, URI url) {
         return new RecursiveAction() {
             @Override
             protected void compute() {
                 try {
                     Page pageEntity = serializePage(siteEntity, url);
-                    SplitToLemmas splitter = SplitToLemmas.getInstance();
-                    String text = splitter.removeHtmlTags(pageEntity.getContent());
-                    splitter.splitTextToLemmas(text).forEach((lemma, amount) -> {
-                        RecursiveAction indexTask = formIndexTask(siteEntity, pageEntity, Map.entry(lemma, amount));
+                    String text = pageEntity.getContent();
+                    Map<String, Long> lemmaMap = SplitToLemmas.getInstanceEng().splitTextToLemmas(text);
+                    lemmaMap.putAll(SplitToLemmas.getInstanceRus().splitTextToLemmas(text));
+                    siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
+                    lemmaMap.forEach((lemma, amount) -> {
+                        RecursiveAction task = indexTask(siteEntity, pageEntity, Map.entry(lemma, amount));
                         try {
-                            TASKS.add(indexTask);
-                            indexTask.invoke();
-                            TASKS.remove(indexTask);
+                            TASKS.add(task);
+                            task.invoke();
+                            TASKS.remove(task);
                         } catch (CancellationException e) {
-                            throw new RuntimeException(e);
+                            throw new RuntimeException(e.getCause());
                         }
                     });
+                    siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
                 } catch (IOException | RuntimeException e) {
-                    throw new RuntimeException(e);
+                    siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, e.getCause().getMessage());
                 }
             }
         };
@@ -128,25 +138,7 @@ public class IndexingServiceImpl implements IndexingService  {
         if (!siteConfig.isEmpty()) {
             Map.Entry<String, String> configEntry = siteConfig.entrySet().iterator().next();
             Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
-            RecursiveAction pageTask = formPageTask(siteEntity, url);
-            taskPool.submit(() -> {
-                try {
-                    siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
-                    TASKS.add(pageTask);
-                    pageTask.invoke();
-                    TASKS.remove(pageTask);
-                    siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
-                } catch (RuntimeException e) {
-                    if (e.getCause() instanceof CancellationException) {
-                        siteRepository.updateStatus(siteEntity.getId(),
-                                IndexStatus.FAILED, IndexError.INTERRUPTED.toString());
-                        throw new RuntimeException(e);
-                    } else {
-                        siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, e.getLocalizedMessage());
-                        throw new RuntimeException(e);
-                    }
-                }
-            });
+            TASKS.add(taskPool.submit(pageTask(siteEntity, url)));
         } else {
             result.setResult(false);
             result.setError(IndexError.PAGE_OUT_OF_CONFIG.toString());

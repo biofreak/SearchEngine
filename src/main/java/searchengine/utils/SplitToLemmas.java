@@ -1,4 +1,4 @@
-package searchengine.services;
+package searchengine.utils;
 
 
 import java.io.IOException;
@@ -10,22 +10,32 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.lucene.morphology.LuceneMorphology;
+import org.apache.lucene.morphology.english.EnglishLuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.jsoup.Jsoup;
-import org.jsoup.nodes.TextNode;
+import org.jsoup.nodes.Element;
 
 public class SplitToLemmas {
 
     private final LuceneMorphology luceneMorphology;
-    private static final String NON_ALPHABET_REGEX = "[^а-яА-Я]";
+    private static String nonAlphabetRegex;
     private static final String SPACE_REGEX = "(\\s|\\z)";
     private static final String WEEK_REGEX = "(\\s|$)((пн|вт|ср|чт|пт|сб|вс)(\\s|$))+";
-    private static final String SINGLE_REGEX = "(\\s|$)(([а-яА-Я])(\\s|$))+";
-    private static final String[] particlesNames = new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "ЧАСТ"};
+    private static final String SINGLE_REGEX = "(\\s|$)(([а-яА-Яa-zA-Z])(\\s|$))+";
+    private static String[] particlesNames = new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "ЧАСТ"};
 
-    public static SplitToLemmas getInstance() throws IOException {
-        LuceneMorphology morphology= new RussianLuceneMorphology();
-        return new SplitToLemmas(morphology);
+    public static SplitToLemmas getInstanceRus() throws IOException {
+        LuceneMorphology morphologyRus = new RussianLuceneMorphology();
+        nonAlphabetRegex = "[^а-яА-Я]";
+        particlesNames = new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "ЧАСТ"};
+        return new SplitToLemmas(morphologyRus);
+    }
+
+    public static SplitToLemmas getInstanceEng() throws IOException {
+        LuceneMorphology morphologyEng = new EnglishLuceneMorphology();
+        nonAlphabetRegex = "[^a-zA-Z]";
+        particlesNames = new String[]{"INT", "PREP", "CONJ", "ARTICLE", "PART"};
+        return new SplitToLemmas(morphologyEng);
     }
 
     private SplitToLemmas(LuceneMorphology luceneMorphology) {
@@ -33,10 +43,10 @@ public class SplitToLemmas {
     }
 
     public Map<String,Long> splitTextToLemmas(String text) {
-        return text.lines()
+        return removeHtmlTags(text).lines()
                 .map(string -> string
                         .replaceAll("(-$)", "")
-                        .replaceAll(NON_ALPHABET_REGEX, " ")
+                        .replaceAll(nonAlphabetRegex, " ")
                         .replaceAll("(\\s+|$)", " ")
                         .replaceAll(WEEK_REGEX, " ")
                         .replaceAll(SINGLE_REGEX, " ")
@@ -45,8 +55,8 @@ public class SplitToLemmas {
                 .map(String::toLowerCase)
                 .map(String::strip)
                 .filter(Predicate.not(String::isBlank))
-                .filter(string -> !anyWordBaseBelongToParticle(luceneMorphology.getMorphInfo(string)))
-                .map(luceneMorphology::getNormalForms)
+                .filter(string -> !anyWordBaseBelongToParticle(getMorphInfo(string)))
+                .map(this::getNormalForms)
                 .filter(Predicate.not(List::isEmpty))
                 .map(list -> list.get(0))
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
@@ -65,9 +75,16 @@ public class SplitToLemmas {
         return false;
     }
 
+    public List<String> getNormalForms(String word) {
+        return luceneMorphology.getNormalForms(word);
+    }
+
+    public List<String> getMorphInfo(String word) {
+        return luceneMorphology.getMorphInfo(word);
+    }
+
     public String removeHtmlTags(String text) {
-        return Jsoup.parse(String.valueOf(text)).getAllElements().textNodes().stream()
-                .map(TextNode::text)
+        return Jsoup.parse(text).getAllElements().stream().map(Element::ownText)
                 .filter(string -> !string.isBlank()).collect(Collectors.joining(" "));
     }
 }

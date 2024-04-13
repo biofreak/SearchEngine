@@ -12,7 +12,6 @@ import java.util.List;
 @Repository
 public interface LemmaRepository extends JpaRepository<Lemma, Integer> {
     Lemma findBySiteAndLemma(Site site, String lemma);
-    List<Lemma> findByLemma(String lemma);
 
     @Query("SELECT COUNT(*) FROM Lemma WHERE site = :site")
     Integer amountBySite(@Param("site") Site site);

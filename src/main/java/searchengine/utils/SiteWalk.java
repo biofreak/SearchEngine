@@ -1,7 +1,8 @@
-package searchengine.services;
+package searchengine.utils;
 
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
+import searchengine.model.IndexError;
 
 import java.io.IOException;
 import java.net.*;
@@ -53,7 +54,7 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
                         }
                     }).distinct().sorted(Comparator.comparing(URI::toString));
         } catch (IOException | RuntimeException e) {
-            return Stream.of();
+            throw new RuntimeException(e);
         }
     }
 
@@ -64,7 +65,7 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
             return Stream.concat(Stream.of(SITE), getReferences(SITE).flatMap(reference ->
                     new SiteWalk(reference, USER_AGENT, REFERRER).invoke()));
         } catch (InterruptedException | CancellationException e) {
-            throw new CancellationException();
+            throw new CancellationException(IndexError.INTERRUPTED.toString());
         } catch (RuntimeException e) {
             throw new RuntimeException(e);
         }
