@@ -43,6 +43,8 @@ public class SearchServiceImpl implements SearchService {
     private SplitToLemmas splitterRus;
     private SplitToLemmas splitterEng;
 
+    private Map<String,List<Lemma>> lemmas;
+
     private final double MENTION_COEFFICIENT = 0.7;
 
     public SearchResponse startSearch(String query, String site, Integer offset, Integer limit) {
@@ -53,21 +55,24 @@ public class SearchServiceImpl implements SearchService {
         } else {
             response.setResult(true);
             List<Site> siteList = site == null ? siteRepository.findAll() : List.of(siteRepository.findByUrl(site));
-            List<String> lemmaList = getLemmasFromQuery(query, siteList);
-            if(lemmaList.isEmpty()) {
-                response.setCount(0);
-            } else {
-                List<Page> pageList = lemmaList.stream().flatMap(lemma -> siteList.stream().map(siteEntity ->
-                                lemmaRepository.findBySiteAndLemma(siteEntity, lemma))
-                        .flatMap(lemmaEntity -> indexRepository.findByLemma(lemmaEntity).stream().map(Index::getPage)))
-                        .toList();
-
-                for (String lemma : lemmaList) pageList = getPagesFromLemma(lemma, pageList);
-                List<SearchResult> resultList = getResultsFromPages(pageList, lemmaList);
-
-                int len = resultList.size(), start = (offset > len - 1) ? len : offset;
-                response.setCount(len);
-                response.setData(start == len ? List.of() : resultList.subList(start, Math.min(start + limit, len)));
+            try {
+                splitterEng = SplitToLemmas.getInstanceEng();
+                splitterRus = SplitToLemmas.getInstanceRus();
+                List<String> lemmaList = getLemmasFromQuery(query, siteList);
+                if (Optional.ofNullable(lemmas).isEmpty() || lemmas.isEmpty()) {
+                    response.setCount(0);
+                } else {
+                    List<Page> pageList = lemmaList.stream().flatMap(lemma -> lemmas.get(lemma).stream())
+                                    .flatMap(lemmaEntity -> indexRepository.findByLemma(lemmaEntity)
+                                            .stream().map(Index::getPage)).distinct().toList();
+                    for (String lemma : lemmaList) pageList = getPagesFromLemma(lemma, pageList);
+                    List<SearchResult> resultList = getResultsFromPages(pageList, lemmaList);
+                    int len = resultList.size(), start = (offset > len - 1) ? len : offset;
+                    response.setCount(len);
+                    response.setData(start == len ? List.of() : resultList.subList(start, Math.min(start + limit,len)));
+                }
+            } catch(IOException e) {
+                throw new RuntimeException(e);
             }
         }
         return response;
@@ -103,54 +108,45 @@ public class SearchServiceImpl implements SearchService {
     }
 
     private List<String> getLemmasFromQuery(String query, List<Site> siteList) {
-        try {
-            Map<String,Long> lemmaMap = SplitToLemmas.getInstanceEng().splitTextToLemmas(query);
-            lemmaMap.putAll(SplitToLemmas.getInstanceRus().splitTextToLemmas(query));
-            return lemmaMap.keySet().stream()
-                    .map(lemma -> Map.entry(lemma, siteList.stream().mapToInt(siteEntity -> {
-                           Lemma lemmaEntity = lemmaRepository.findBySiteAndLemma(siteEntity, lemma);
-                           return lemmaEntity != null ? lemmaEntity.getFrequency() : 0;
-                    }).sum()))
-                    .filter(entry -> entry.getValue() > 0)
-                    .sorted(Map.Entry.comparingByValue())
-                    .filter(entry -> {
-                        int pageTotal = siteList.stream().mapToInt(siteEntity ->
-                                pageRepository.findBySite(siteEntity).size()).sum();
-                        return pageTotal > 0; // && (double) (entry.getValue() / pageTotal) > MENTION_COEFFICIENT;
-                    }).map(Map.Entry::getKey)
-                    .toList();
-        } catch (IOException e) {
-            return List.of();
-        }
+        Map<String, Long> lemmaMap = splitToLemmas(query);
+        lemmas = lemmaMap.keySet().stream()
+                .map(lemma -> Map.entry(lemma, siteList.stream()
+                        .map(siteEntity -> lemmaRepository.findBySiteAndLemma(siteEntity, lemma)).toList()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return lemmaMap.keySet().stream()
+                .map(lemma -> Map.entry(lemma, lemmas.get(lemma).stream()
+                        .mapToInt(x -> x == null ? 0 : x.getFrequency()).sum()))
+                .filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.comparingByValue())
+                .filter(entry -> {
+                    int pageTotal = siteList.stream().mapToInt(siteEntity ->
+                            pageRepository.findBySite(siteEntity).size()).sum();
+                    return pageTotal > 0; // && (double) (entry.getValue() / pageTotal) > MENTION_COEFFICIENT;
+                }).map(Map.Entry::getKey)
+                .toList();
     }
 
     private List<SearchResult> getResultsFromPages(List<Page> pageList, List<String> lemmaList) {
-        try {
-            splitterEng = SplitToLemmas.getInstanceEng();
-            splitterRus = SplitToLemmas.getInstanceRus();
-            Map<Page, Double> rankMap = pageList.stream().map(pageEntity -> Map.entry(pageEntity,
-                            indexRepository.rankByPage(pageEntity)))
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        Map<Page, Double> rankMap = pageList.stream().map(pageEntity -> Map.entry(pageEntity,
+                        indexRepository.rankByPage(pageEntity)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
-            double maxRank = rankMap.entrySet().stream().max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getValue).orElse(0.0);
+        double maxRank = rankMap.entrySet().stream().max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getValue).orElse(0.0);
 
-            return pageList.stream().map(pageEntity -> {
-                SearchResult result = new SearchResult();
-                Site siteEntity = pageEntity.getSite();
-                String htmlCode = pageEntity.getContent();
+        return pageList.stream().map(pageEntity -> {
+            SearchResult result = new SearchResult();
+            Site siteEntity = pageEntity.getSite();
+            String htmlCode = pageEntity.getContent();
 
-                result.setSite(siteEntity.getUrl());
-                result.setSiteName(siteEntity.getName());
-                result.setUri(pageEntity.getPath());
-                result.setTitle(Jsoup.parse(htmlCode).getElementsByTag("title").text());
-                result.setSnippet(getSnippetFromContent(htmlCode, lemmaList));
-                result.setRelevance(maxRank > 0.0 ? rankMap.get(pageEntity) / maxRank : 0.0);
-                return result;
-            }).sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed()).toList();
-        } catch(IOException e) {
-            return List.of();
-        }
+            result.setSite(siteEntity.getUrl());
+            result.setSiteName(siteEntity.getName());
+            result.setUri(pageEntity.getPath());
+            result.setTitle(Jsoup.parse(htmlCode).getElementsByTag("title").text());
+            result.setSnippet(getSnippetFromContent(htmlCode, lemmaList));
+            result.setRelevance(maxRank > 0.0 ? rankMap.get(pageEntity) / maxRank : 0.0);
+            return result;
+        }).sorted(Comparator.comparingDouble(SearchResult::getRelevance).reversed()).toList();
     }
 
     private Stream<String> getNormalForms(String word) {
@@ -162,6 +158,16 @@ public class SearchServiceImpl implements SearchService {
             } catch (WrongCharaterException rus) {
                 return Stream.of();
             }
+        }
+    }
+
+    private Map<String,Long> splitToLemmas(String text) {
+        try {
+            return  Stream.concat(splitterEng.splitTextToLemmas(text).entrySet().stream(),
+                    splitterRus.splitTextToLemmas(text).entrySet().stream())
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        } catch (WrongCharaterException eng) {
+            return Map.of();
         }
     }
 }

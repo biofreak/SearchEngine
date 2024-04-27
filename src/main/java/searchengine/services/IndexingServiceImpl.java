@@ -3,7 +3,6 @@ package searchengine.services;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
-import org.jsoup.nodes.Element;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.config.SitesList;
@@ -53,10 +52,11 @@ public class IndexingServiceImpl implements IndexingService  {
 
                 TASKS.add(taskPool.submit(() -> {
                     try {
-                        SiteWalk walkTask = new SiteWalk(new URI(url),
+                        SiteWalk walkTask = new SiteWalk(Set.of(new URI(url)),
                                 getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
                         TASKS.add(walkTask);
-                        walkTask.invoke().forEach(this::addIndex);
+                        walkTask.invoke().sorted(Comparator.comparing(URI::toString)).distinct()
+                                .forEach(this::addIndex);
                         TASKS.remove(walkTask);
                     } catch (RuntimeException | URISyntaxException e) {
                         Optional.ofNullable(e.getCause()).ifPresent(x ->
@@ -83,9 +83,8 @@ public class IndexingServiceImpl implements IndexingService  {
         } else {
             taskPool.shutdownNow();
             while(!taskPool.isTerminated()) {
-                TASKS.forEach(task -> {
-                    task.completeExceptionally(new CancellationException(IndexError.INTERRUPTED.toString()));
-                });
+                TASKS.forEach(task -> task
+                        .completeExceptionally(new CancellationException(IndexError.INTERRUPTED.toString())));
             }
             TASKS.clear();
             taskPool = new ForkJoinPool();
@@ -104,13 +103,13 @@ public class IndexingServiceImpl implements IndexingService  {
         };
     }
 
-    private RecursiveAction pageTask(Site siteEntity, URI url) {
+    private RecursiveAction pageTask(Page pageEntity) {
         return new RecursiveAction() {
             @Override
             protected void compute() {
+                String text = pageEntity.getContent();
+                Site siteEntity = pageEntity.getSite();
                 try {
-                    Page pageEntity = serializePage(siteEntity, url);
-                    String text = pageEntity.getContent();
                     Map<String, Long> lemmaMap = SplitToLemmas.getInstanceEng().splitTextToLemmas(text);
                     lemmaMap.putAll(SplitToLemmas.getInstanceRus().splitTextToLemmas(text));
                     siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
@@ -138,7 +137,16 @@ public class IndexingServiceImpl implements IndexingService  {
         if (!siteConfig.isEmpty()) {
             Map.Entry<String, String> configEntry = siteConfig.entrySet().iterator().next();
             Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
-            TASKS.add(taskPool.submit(pageTask(siteEntity, url)));
+            Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath());
+            if (pageEntity != null) {
+                refreshFrequenciesByPageId(pageEntity, -1);
+                pageRepository.delete(pageEntity);
+            }
+            try {
+                TASKS.add(taskPool.submit(pageTask(serializePage(siteEntity, url))));
+            } catch(IOException e) {
+                throw new RuntimeException(e);
+            }
         } else {
             result.setResult(false);
             result.setError(IndexError.PAGE_OUT_OF_CONFIG.toString());
@@ -161,17 +169,11 @@ public class IndexingServiceImpl implements IndexingService  {
 
     private Page serializePage(Site site, URI url) throws IOException {
         String path = url.getPath();
-        Page pageEntity = pageRepository.findBySiteAndPath(site, path);
-        if (pageEntity != null) {
-            refreshFrequenciesByPageId(pageEntity, -1);
-            pageRepository.delete(pageEntity);
-        }
-
         Connection.Response response = getURLConnection(url);
         Integer code = response.statusCode();
         String content = response.body();
 
-        pageEntity = new Page();
+        Page pageEntity = new Page();
         pageEntity.setSite(site);
         pageEntity.setPath(path.isEmpty() ? "/" : path);
         pageEntity.setCode(code);
@@ -202,11 +204,13 @@ public class IndexingServiceImpl implements IndexingService  {
     }
 
     private void refreshFrequenciesByPageId(Page page, Integer number) {
-        indexRepository.findByPage(page).forEach(index -> {
-            Lemma lemmaEntity = index.getLemma();
-            lemmaEntity.setFrequency(lemmaEntity.getFrequency() + number);
-            lemmaRepository.save(lemmaEntity);
-        });
+        synchronized (indexRepository) {
+            indexRepository.findByPage(page).forEach(index -> {
+                Lemma lemmaEntity = index.getLemma();
+                lemmaEntity.setFrequency(lemmaEntity.getFrequency() + number);
+                lemmaRepository.save(lemmaEntity);
+            });
+        }
     }
 
     private String getConfigAttribute(String attribute) {

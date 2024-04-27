@@ -21,12 +21,12 @@ public class Page implements Serializable {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", insertable = false)
     private Integer id;
-    @ManyToOne(fetch = FetchType.EAGER, cascade = CascadeType.MERGE)
+    @ManyToOne(fetch = FetchType.EAGER, cascade = {CascadeType.MERGE})
     @JoinColumn(name = "site_id", foreignKey = @ForeignKey(name = "fk_page_site"), nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Site site;
     @Column(name = "path", nullable = false)
-    @Pattern(regexp = "(/[\\S&&[^/.]]+)+(.htm(l)?)?", message = "Correct page address")
+    @Pattern(regexp = "(/[\\S&&[^/]]+)*(/[\\S&&[^/.]]+)(.htm(l)?)?", message = "Correct page address")
     private String path;
     @Column(name = "code", nullable = false)
     private Integer code;
