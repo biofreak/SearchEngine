@@ -10,7 +10,6 @@ import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.RecursiveTask;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class SiteWalk extends RecursiveTask<Stream<URI>> {
@@ -55,6 +54,7 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
                     .filter(link -> link.matches(regex))
                     .map(string -> {
                         try {
+                            System.out.println(site + " ---> " + string);
                             return new URI(string);
                         } catch (URISyntaxException e) {
                             throw new RuntimeException(e);
@@ -65,40 +65,12 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
         }
     }
 
-    private Stream<URI> getChildren(URI site) {
-        return getReferences(site, site.toString() + CHILD_REGEX);
-    }
-
-    private Set<URI> getNeighbors(Set<URI> neighbors) {
-        try {
-            Set<URI> result = neighbors.stream()
-                    .flatMap(url -> getReferences(url, getParent(url.toString()) + CHILD_REGEX)
-                            .filter(Predicate.not(neighbors::contains))).collect(Collectors.toSet());
-            Set<URI> iteration = result;
-            while (!iteration.isEmpty()) {
-                iteration = iteration.stream()
-                        .flatMap(url -> getReferences(url, getParent(url.toString()) + CHILD_REGEX)
-                                .filter(Predicate.not(neighbors::contains))
-                                .filter(Predicate.not(result::contains)))
-                        .collect(Collectors.toSet());
-                result.addAll(iteration);
-            }
-            return result;
-        } catch (CancellationException e) {
-            throw new CancellationException(IndexError.INTERRUPTED.toString());
-        } catch (RuntimeException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     @Override
     protected Stream<URI> compute() {
         try {
             Thread.sleep(120);
-            Set<URI> children = SITE.stream().flatMap(this::getChildren).collect(Collectors.toSet());
-            children.addAll(getNeighbors(children));
-            return children.isEmpty() ? SITE.stream() : Stream.concat(SITE.stream(),
-                        new SiteWalk(children, USER_AGENT, REFERRER).invoke());
+            return SITE.stream().flatMap(url -> getReferences(url, getParent(url.toString()) + CHILD_REGEX)
+                            .filter(Predicate.not(SITE::contains)));
         } catch (InterruptedException | CancellationException e) {
             throw new CancellationException(IndexError.INTERRUPTED.toString());
         } catch (RuntimeException e) {

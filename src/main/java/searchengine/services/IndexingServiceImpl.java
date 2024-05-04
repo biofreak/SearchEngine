@@ -21,6 +21,7 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -42,7 +43,6 @@ public class IndexingServiceImpl implements IndexingService  {
 
     public IndexingResponse fullIndex() {
         IndexingResponse result = new IndexingResponse(true);
-
         if (!siteRepository.isIndexing()) {
             siteRepository.deleteAll();
 
@@ -52,12 +52,10 @@ public class IndexingServiceImpl implements IndexingService  {
 
                 TASKS.add(taskPool.submit(() -> {
                     try {
-                        SiteWalk walkTask = new SiteWalk(Set.of(new URI(url)),
-                                getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
-                        TASKS.add(walkTask);
-                        walkTask.invoke().sorted(Comparator.comparing(URI::toString)).distinct()
-                                .forEach(this::addIndex);
-                        TASKS.remove(walkTask);
+                        URI link = new URI(url);
+
+                        Stream.concat(Stream.of(link), walkTask(Set.of(link)))
+                                .sorted(Comparator.comparing(URI::toString)).forEach(this::addIndex);
                     } catch (RuntimeException | URISyntaxException e) {
                         Optional.ofNullable(e.getCause()).ifPresent(x ->
                                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, x.getMessage()));
@@ -91,6 +89,21 @@ public class IndexingServiceImpl implements IndexingService  {
         }
 
         return response;
+    }
+
+    private Stream<URI> walkTask(Set<URI> urlSet) {
+        try {
+            SiteWalk task = new SiteWalk(urlSet, getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
+
+            TASKS.add(task);
+            Set<URI> children = task.invoke().collect(Collectors.toSet());
+            TASKS.remove(task);
+
+            return children.isEmpty() ? Stream.of() : Stream.concat(children.stream(), walkTask(Stream
+                    .concat(urlSet.stream(), children.stream()).collect(Collectors.toSet())));
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e.getCause());
+        }
     }
 
     private RecursiveAction indexTask(Site siteEntity, Page pageEntity, Map.Entry<String,Long> entry) {
