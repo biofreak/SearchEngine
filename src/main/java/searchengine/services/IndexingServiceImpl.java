@@ -20,6 +20,7 @@ import java.net.*;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -54,7 +55,7 @@ public class IndexingServiceImpl implements IndexingService  {
                     try {
                         URI link = new URI(url);
 
-                        Stream.concat(Stream.of(link), walkTask(Set.of(link)))
+                        Stream.concat(Stream.of(link), walkTask(Set.of(link), Set.of(link)))
                                 .sorted(Comparator.comparing(URI::toString)).forEach(this::addIndex);
                     } catch (RuntimeException | URISyntaxException e) {
                         Optional.ofNullable(e.getCause()).ifPresent(x ->
@@ -91,16 +92,16 @@ public class IndexingServiceImpl implements IndexingService  {
         return response;
     }
 
-    private Stream<URI> walkTask(Set<URI> urlSet) {
+    private Stream<URI> walkTask(Set<URI> urlSet, Set<URI> walkSet) {
         try {
-            SiteWalk task = new SiteWalk(urlSet, getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
+            SiteWalk task = new SiteWalk(walkSet, getConfigAttribute("userAgent"), getConfigAttribute("referrer"));
 
             TASKS.add(task);
-            Set<URI> children = task.invoke().collect(Collectors.toSet());
+            Set<URI> children = task.invoke().filter(Predicate.not(urlSet::contains)).collect(Collectors.toSet());
             TASKS.remove(task);
 
-            return children.isEmpty() ? Stream.of() : Stream.concat(children.stream(), walkTask(Stream
-                    .concat(urlSet.stream(), children.stream()).collect(Collectors.toSet())));
+            return children.isEmpty() ? Stream.of() : Stream.concat(children.stream(),
+                    walkTask(Stream.concat(urlSet.stream(), children.stream()).collect(Collectors.toSet()), children));
         } catch (RuntimeException e) {
             throw new RuntimeException(e.getCause());
         }

@@ -50,7 +50,7 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
                     .map(link -> (link.lastIndexOf("/") == link.length()-1) ?link.substring(0,link.length()-1):link)
                     .map(link -> link.contains("?") ? link.substring(0, link.lastIndexOf("?")) : link)
                     .map(link -> link.contains("#") ? link.substring(0, link.lastIndexOf("#")) : link)
-                    .filter(link -> !link.isEmpty()&&!link.equals(site.toString()))
+                    .filter(link -> !link.isEmpty() && !link.equals(site.toString()))
                     .filter(link -> link.matches(regex))
                     .map(string -> {
                         try {
@@ -69,8 +69,7 @@ public class SiteWalk extends RecursiveTask<Stream<URI>> {
     protected Stream<URI> compute() {
         try {
             Thread.sleep(120);
-            return SITE.stream().flatMap(url -> getReferences(url, getParent(url.toString()) + CHILD_REGEX)
-                            .filter(Predicate.not(SITE::contains)));
+            return SITE.stream().flatMap(url -> getReferences(url, getParent(url.toString()) + CHILD_REGEX));
         } catch (InterruptedException | CancellationException e) {
             throw new CancellationException(IndexError.INTERRUPTED.toString());
         } catch (RuntimeException e) {
