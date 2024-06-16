@@ -25,14 +25,22 @@ public class SplitToLemmas {
     private static final String SINGLE_REGEX = "(\\s|$)(([а-яА-Яa-zA-Z])(\\s|$))+";
     private final String[] particlesNames;
 
-    public static SplitToLemmas getInstanceRus() throws IOException {
-        LuceneMorphology morphologyRus = new RussianLuceneMorphology();
-        return new SplitToLemmas(morphologyRus, "[^а-яА-Я]", new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "ЧАСТ"});
+    public static SplitToLemmas getInstanceRus() {
+        try {
+            LuceneMorphology morphologyRus = new RussianLuceneMorphology();
+            return new SplitToLemmas(morphologyRus, "[^а-яА-Я]", new String[]{"МЕЖД", "ПРЕДЛ", "СОЮЗ", "ЧАСТ"});
+        } catch (IOException e) {
+            return null;
+        }
     }
 
-    public static SplitToLemmas getInstanceEng() throws IOException {
-        LuceneMorphology morphologyEng = new EnglishLuceneMorphology();
-        return new SplitToLemmas(morphologyEng, "[^a-zA-Z]", new String[]{"INT","PREP","CONJ","ARTICLE","PART"});
+    public static SplitToLemmas getInstanceEng() {
+        try {
+            LuceneMorphology morphologyEng = new EnglishLuceneMorphology();
+            return new SplitToLemmas(morphologyEng, "[^a-zA-Z]", new String[]{"INT", "PREP", "CONJ", "ARTICLE", "PART"});
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private SplitToLemmas(LuceneMorphology luceneMorphology, String regex, String[] particlesNames) {

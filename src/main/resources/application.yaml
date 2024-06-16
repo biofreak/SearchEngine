@@ -4,9 +4,11 @@ server:
 spring:
   jackson:
     default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
   datasource:
     username: root
-    password: "123456"
+    password: "root"
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/search_engine
     name: search_engine
@@ -27,9 +29,9 @@ spring:
       platform: mysql
 indexing-settings:
   userAgent: "Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6"
-  referrer: "http://www.google.com"
+  referrer: "https://www.google.com"
   sites:
     - url: https://www.playback.ru
       name: PlayBack.Ru
-    - url: https://volochek.life
-      name: VOLOCHEK.LIFE
+    - url: https://www.svetlovka.ru
+      name: Svetlovka.RU

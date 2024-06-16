@@ -40,8 +40,8 @@ public class SearchServiceImpl implements SearchService {
     @Autowired
     private final IndexRepository indexRepository;
 
-    private SplitToLemmas splitterRus;
-    private SplitToLemmas splitterEng;
+    private final Optional<SplitToLemmas> splitterRus = Optional.ofNullable(SplitToLemmas.getInstanceRus());
+    private final Optional<SplitToLemmas> splitterEng = Optional.ofNullable(SplitToLemmas.getInstanceEng());
 
     private Map<String, List<Lemma>> lemmas;
 
@@ -55,23 +55,18 @@ public class SearchServiceImpl implements SearchService {
         } else {
             response.setResult(true);
             List<Site> siteList = site == null ? siteRepository.findAll() : List.of(siteRepository.findByUrl(site));
-            try {
-                splitterEng = SplitToLemmas.getInstanceEng();
-                splitterRus = SplitToLemmas.getInstanceRus();
-                List<String> lemmaList = getLemmasFromQuery(query, siteList);
-                if (Optional.ofNullable(lemmas).isEmpty() || lemmas.isEmpty()) {
-                    response.setCount(0);
-                } else {
-                    List<Page> pageList = lemmas.get(lemmaList.get(0)).stream()
-                            .flatMap(lemmaEntity -> indexRepository.findByLemma(lemmaEntity)
-                                    .stream().map(Index::getPage)).distinct().toList();
-                    for(String lemma:lemmaList.subList(1,lemmaList.size())) pageList=getPagesFromLemma(lemma,pageList);
-                    List<SearchResult> resultList = getResultsFromPages(pageList, offset, limit);
-                    response.setCount(pageList.size());
-                    response.setData(resultList);
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+            List<String> lemmaList = getLemmasFromQuery(query, siteList);
+            if (Optional.ofNullable(lemmas).isEmpty() || lemmas.isEmpty()) {
+                response.setCount(0);
+            } else {
+                List<Page> pageList = lemmas.get(lemmaList.get(0)).stream()
+                        .flatMap(lemmaEntity -> indexRepository.findByLemma(lemmaEntity)
+                                .stream().map(Index::getPage)).distinct().toList();
+                for (String lemma : lemmaList.subList(1, lemmaList.size()))
+                    pageList = getPagesFromLemma(lemma, pageList);
+                List<SearchResult> resultList = getResultsFromPages(pageList, offset, limit);
+                response.setCount(pageList.size());
+                response.setData(resultList);
             }
         }
         return response;
@@ -110,7 +105,7 @@ public class SearchServiceImpl implements SearchService {
                 .map(lemma -> Map.entry(lemma, siteList.stream()
                         .map(siteEntity -> lemmaRepository.findBySiteAndLemma(siteEntity, lemma)).toList()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        int pageTotal = siteList.stream().mapToInt(pageRepository::amountBySite).sum();
+        int pageTotal = siteList.stream().mapToInt(pageRepository::countAllBySite).sum();
         return lemmaMap.keySet().stream()
                 .map(lemma -> Map.entry(lemma, lemmas.get(lemma).stream()
                         .mapToInt(x -> x == null ? 0 : x.getFrequency()).sum()))
@@ -151,11 +146,11 @@ public class SearchServiceImpl implements SearchService {
 
     private Stream<String> getNormalForms(String word) {
         try {
-            return splitterEng.getNormalForms(word.toLowerCase()).stream();
-        } catch (WrongCharaterException eng) {
+            return splitterEng.map(x -> x.getNormalForms(word.toLowerCase()).stream()).orElseThrow();
+        } catch (RuntimeException eng) {
             try {
-                return splitterRus.getNormalForms(word.toLowerCase()).stream();
-            } catch (WrongCharaterException rus) {
+                return splitterRus.map(x -> x.getNormalForms(word.toLowerCase()).stream()).orElseThrow();
+            } catch (RuntimeException rus) {
                 return Stream.of();
             }
         }
@@ -163,10 +158,10 @@ public class SearchServiceImpl implements SearchService {
 
     private Map<String, Long> splitToLemmas(String text) {
         try {
-            return Stream.concat(splitterEng.splitTextToLemmas(text).entrySet().stream(),
-                            splitterRus.splitTextToLemmas(text).entrySet().stream())
+            return Stream.concat(splitterEng.map(x -> x.splitTextToLemmas(text).entrySet().stream()).orElseThrow(),
+                            splitterRus.map(x -> x.splitTextToLemmas(text).entrySet().stream()).orElseThrow())
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        } catch (WrongCharaterException eng) {
+        } catch (RuntimeException e) {
             return Map.of();
         }
     }

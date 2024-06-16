@@ -55,8 +55,8 @@ public class StatisticsServiceImpl implements StatisticsService {
             DetailedStatisticsItem item = new DetailedStatisticsItem();
             item.setName(siteEntity.getName());
             item.setUrl(siteEntity.getUrl());
-            item.setPages(pageRepository.amountBySite(siteEntity));
-            item.setLemmas(lemmaRepository.amountBySite(siteEntity));
+            item.setPages(pageRepository.countAllBySite(siteEntity));
+            item.setLemmas(lemmaRepository.countAllBySite(siteEntity));
             item.setStatus(siteEntity.getStatus().toString());
             item.setError(siteEntity.getLastError());
             item.setStatusTime(siteEntity.getStatusTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());

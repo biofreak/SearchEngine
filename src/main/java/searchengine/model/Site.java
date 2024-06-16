@@ -1,8 +1,11 @@
 package searchengine.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import jakarta.persistence.*;
 import jakarta.persistence.Table;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.annotations.*;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -13,12 +16,13 @@ import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "site", uniqueConstraints = {@UniqueConstraint(name="uk_url", columnNames={"url"})})
+@NoArgsConstructor(onConstructor_={@JsonCreator(mode = JsonCreator.Mode.PROPERTIES)})
 @RequiredArgsConstructor
 public class Site implements Serializable {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", insertable = false)
-    private Integer id;
+    private int id;
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, insertable = false)
     @ColumnDefault("'INDEXING'")
@@ -36,7 +40,9 @@ public class Site implements Serializable {
     @OptimisticLock(excluded = true)
     private String lastError;
     @Column(name = "url", unique = true, nullable = false, updatable = false)
+    @NonNull
     private String url;
     @Column(name = "name", nullable = false, updatable = false)
+    @NonNull
     private String name;
 }
