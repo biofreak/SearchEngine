@@ -7,7 +7,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import org.hibernate.annotations.*;
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OptimisticLock;
+import org.hibernate.annotations.UpdateTimestamp;
 import org.springframework.data.annotation.LastModifiedDate;
 
 import java.io.Serializable;
@@ -45,4 +47,8 @@ public class Site implements Serializable {
     @Column(name = "name", nullable = false, updatable = false)
     @NonNull
     private String name;
+    /*@OneToMany(mappedBy = "site", orphanRemoval = true, cascade = CascadeType.ALL)
+    private List<Page> pages = new ArrayList<>();
+    @OneToMany(mappedBy = "site", orphanRemoval = true, cascade = CascadeType.ALL)
+    private List<Lemma> lemmas = new ArrayList<>();*/
 }

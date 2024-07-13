@@ -9,10 +9,11 @@ import searchengine.model.Lemma;
 import searchengine.model.Site;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface LemmaRepository extends JpaRepository<Lemma, Integer> {
-    Lemma findBySiteAndLemma(Site site, String lemma);
+    Optional<Lemma> findBySiteAndLemma(Site site, String lemma);
 
     Integer countAllBySite(Site site);
 

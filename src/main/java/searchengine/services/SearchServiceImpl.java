@@ -1,7 +1,6 @@
 package searchengine.services;
 
 import lombok.RequiredArgsConstructor;
-import org.apache.lucene.morphology.WrongCharaterException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +18,6 @@ import searchengine.repositories.IndexRepository;
 
 import searchengine.utils.SplitToLemmas;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -54,7 +52,8 @@ public class SearchServiceImpl implements SearchService {
             response.setError("Задан пустой поисковый запрос");
         } else {
             response.setResult(true);
-            List<Site> siteList = site == null ? siteRepository.findAll() : List.of(siteRepository.findByUrl(site));
+            List<Site> siteList = site == null
+                    ? siteRepository.findAll() : List.of(siteRepository.findByUrl(site).orElseThrow());
             List<String> lemmaList = getLemmasFromQuery(query, siteList);
             if (Optional.ofNullable(lemmas).isEmpty() || lemmas.isEmpty()) {
                 response.setCount(0);
@@ -74,8 +73,9 @@ public class SearchServiceImpl implements SearchService {
 
     private List<Page> getPagesFromLemma(String lemma, List<Page> pageList) {
         return pageList.stream().filter(pageEntity ->
-                Optional.ofNullable(indexRepository.findByPageAndLemma(pageEntity,
-                        lemmaRepository.findBySiteAndLemma(pageEntity.getSite(), lemma))).isPresent()).toList();
+                indexRepository.findByPageAndLemma(pageEntity,
+                        lemmaRepository.findBySiteAndLemma(pageEntity.getSite(),lemma).orElse(null)).isPresent())
+                .toList();
     }
 
     private String getSnippetFromContent(String htmlCode, Set<String> lemmaSet) {
@@ -103,7 +103,8 @@ public class SearchServiceImpl implements SearchService {
         Map<String, Long> lemmaMap = splitToLemmas(query);
         lemmas = lemmaMap.keySet().stream()
                 .map(lemma -> Map.entry(lemma, siteList.stream()
-                        .map(siteEntity -> lemmaRepository.findBySiteAndLemma(siteEntity, lemma)).toList()))
+                        .map(siteEntity -> lemmaRepository.findBySiteAndLemma(siteEntity, lemma).orElse(null))
+                        .filter(Predicate.not(Objects::isNull)).toList()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         int pageTotal = siteList.stream().mapToInt(pageRepository::countAllBySite).sum();
         return lemmaMap.keySet().stream()
@@ -120,8 +121,9 @@ public class SearchServiceImpl implements SearchService {
     private List<SearchResult> getResultsFromPages(List<Page> pageList, int offset, int limit) {
         Map<Page, Double> rankMap = pageList.stream().map(pageEntity -> Map.entry(pageEntity,
                                 lemmas.values().stream().flatMap(Collection::stream)
-                                        .mapToDouble(lemmaEntity -> indexRepository
-                                                .findByPageAndLemma(pageEntity, lemmaEntity).getRank()).sum()))
+                                        .map(lemmaEntity -> indexRepository
+                                                .findByPageAndLemma(pageEntity, lemmaEntity).orElse(null))
+                                        .filter(Objects::nonNull).mapToDouble(Index::getRank).sum()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         double maxRank = rankMap.entrySet().stream().max(Map.Entry.comparingByValue())

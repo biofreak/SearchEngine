@@ -8,7 +8,7 @@ import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import searchengine.config.SitesList;
+import searchengine.config.SiteList;
 import searchengine.dto.indexing.IndexingResponse;
 import searchengine.model.*;
 import searchengine.repositories.IndexRepository;
@@ -38,9 +38,8 @@ public class IndexingServiceImpl implements IndexingService  {
     @Autowired
     private final IndexRepository indexRepository;
     @Autowired
-    private SitesList sites;
-
-    private final int PAGES_CHUNK = 200;
+    private SiteList sites;
+    private final int PAGES_CHUNK = 250;
 
     private ForkJoinPool taskPool = new ForkJoinPool();
     private final Vector<ForkJoinTask<?>> TASKS = new Vector<>();
@@ -48,12 +47,12 @@ public class IndexingServiceImpl implements IndexingService  {
     private final Optional<SplitToLemmas> splitterEng = Optional.ofNullable(SplitToLemmas.getInstanceEng());
     private final Optional<SplitToLemmas> splitterRus = Optional.ofNullable(SplitToLemmas.getInstanceRus());
 
-    private final Set<Lemma> lemmaBuffer = new HashSet<>();
+    private final Set<Lemma> lemmaBuffer = ConcurrentHashMap.newKeySet();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     public IndexingResponse fullIndex() {
         IndexingResponse result = new IndexingResponse(true);
-        if (!siteRepository.isIndexing()) {
+        if (!siteRepository.existsByStatusIs(IndexStatus.INDEXING)) {
             siteRepository.deleteAll();
             sites.getSites().forEach(config -> TASKS.add(taskPool.submit(() ->{
                 String url = config.getUrl();
@@ -62,14 +61,18 @@ public class IndexingServiceImpl implements IndexingService  {
                         List<URI> urlBuffer = new ArrayList<>() {{ add(new URI(url)); }};
                         serializePages(siteEntity, urlBuffer);
                         siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
-                        walkTask(urlBuffer, urlBuffer, siteEntity).map(this::indexTask).peek(taskPool::submit)
-                                .forEach(task -> {
-                                    task.join();
-                                    TASKS.remove(task);
+                        walkTask(urlBuffer,urlBuffer,siteEntity).filter(Objects::nonNull).map(pageEntity ->
+                                taskPool.submit(() -> serializeIndex(pageEntity))).peek(TASKS::add).forEach(task -> {
+                                    try {
+                                        task.join();
+                                        TASKS.remove(task);
+                                    } catch (CancellationException e) {
+                                        throw new CancellationException(IndexError.INTERRUPTED.toString());
+                                    }
                                 });
                         siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
                     } catch (RuntimeException | URISyntaxException e) {
-                                siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, e.getMessage());
+                        siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, e.getMessage());
                     }
             })));
         } else {
@@ -103,12 +106,11 @@ public class IndexingServiceImpl implements IndexingService  {
 
     private Stream<Page> walkTask(List<URI> urlBuffer, List<URI> walkSet, Site siteEntity) {
         try {
-            List<URI> children = walkSet.stream().map(URI::getPath)
-                    .map(path -> taskPool.submit(() -> {
-                        Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, path.isEmpty() ? "/" : path);
-                        return new SiteWalk(urlBuffer, pageEntity, siteEntity.getUrl());
-                    })).peek(TASKS::add).map(ForkJoinTask::join).peek(taskPool::submit).peek(TASKS::add)
-                    .flatMap(task -> {
+            List<URI> children = walkSet.stream().map(URI::getPath).map(path -> path.isEmpty() ? "/" : path)
+                    .map(path -> pageRepository.findBySiteAndPath(siteEntity, path).orElse(null))
+                    .filter(Objects::nonNull)
+                    .map(pageEntity -> taskPool.submit(new SiteWalk(urlBuffer, pageEntity, siteEntity.getUrl())))
+                    .peek(TASKS::add).flatMap(task -> {
                         Stream<String> result = task.join();
                         TASKS.remove(task);
                         return result;
@@ -120,8 +122,8 @@ public class IndexingServiceImpl implements IndexingService  {
                         }
                     }).toList();
             if (children.isEmpty()) {
-                return urlBuffer.stream().map(URI::getPath)
-                        .map(path -> pageRepository.findBySiteAndPath(siteEntity, path.isEmpty() ? "/" : path));
+                return urlBuffer.stream().map(URI::getPath).map(path -> path.isEmpty() ? "/" : path)
+                        .map(path -> pageRepository.findBySiteAndPath(siteEntity, path).orElse(null));
             } else {
                 serializePages(siteEntity, children);
                 return walkTask(Stream.concat(urlBuffer.stream(), children.stream()).toList(), children, siteEntity);
@@ -139,18 +141,16 @@ public class IndexingServiceImpl implements IndexingService  {
         if (!siteConfig.isEmpty()) {
             Map.Entry<String, String> configEntry = siteConfig.entrySet().iterator().next();
             Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
-            Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath());
+            Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath()).orElse(null);
             if (pageEntity != null) {
                 refreshFrequencies(indexRepository.findByPage(pageEntity).stream().map(Index::getLemma).toList(),-1);
                 pageRepository.delete(pageEntity);
             }
             try {
-                RecursiveAction task = indexTask(pageRepository.findBySiteAndPath(siteEntity, url.getPath()));
                 serializePages(siteEntity, List.of(url));
                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
-                TASKS.add(taskPool.submit(task));
-                task.join();
-                TASKS.remove(task);
+                serializeIndex(Objects.requireNonNull(pageRepository.findBySiteAndPath(siteEntity, url.getPath())
+                        .orElse(null)));
                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
             } catch(RuntimeException e) {
                 throw new RuntimeException(e);
@@ -162,86 +162,93 @@ public class IndexingServiceImpl implements IndexingService  {
         return result;
     }
 
-    private RecursiveAction indexTask(Page pageEntity) {
-        return new RecursiveAction() {
-            @Override
-            protected void compute() {
-                String text = pageEntity.getContent();
-                Map<String, Long> lemmaMap = splitterEng.orElseThrow().splitTextToLemmas(text);
-                lemmaMap.putAll(splitterRus.orElseThrow().splitTextToLemmas(text));
-                synchronized (indexRepository) {
-                    try {
-                        indexRepository.insertAll(objectMapper.writeValueAsString(
-                                serializeLemmas(pageEntity, lemmaMap.keySet()).stream()
-                                        .map(lemmaEntity -> taskPool.submit(() -> new Index(pageEntity, lemmaEntity,
-                                                Float.valueOf(lemmaMap.get(lemmaEntity.getLemma())))
-                                        )).peek(TASKS::add).map(task -> {
-                                            Index result = task.join();
-                                            TASKS.remove(task);
-                                            return result;
-                                        }).toList()));
-                    } catch (CancellationException e) {
-                        throw new CancellationException(IndexError.INTERRUPTED.toString());
-                    } catch (JsonProcessingException | RuntimeException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
-        };
-    }
-
     private Site serializeSite(String url, String name) {
-        synchronized (siteRepository) {
-            Site site = siteRepository.findByUrl(url);
-            return site == null ? siteRepository.save(new Site(url, name)) : site;
-        }
+            return siteRepository.findByUrl(url).orElseGet(() -> siteRepository.saveAndFlush(new Site(url, name)));
     }
 
-    private void serializePages(Site siteEntity, List<URI> urlList) {
+    protected void serializePages(Site siteEntity, List<URI> urlList) {
         int i = urlList.size() % PAGES_CHUNK, j = (urlList.size() - i) / PAGES_CHUNK;
         for (int k = 0, start = 0; k <= j; k++, start = k * PAGES_CHUNK) {
-            synchronized (pageRepository) {
-                try {
-                    pageRepository.insertAll(objectMapper.writeValueAsString(urlList
-                            .subList(start, k < j ? (start + PAGES_CHUNK) : (start + i)).stream()
-                            .map(url -> taskPool.submit(() -> {
+            try {
+                pageRepository.insertAll(urlList.subList(start, k < j ? (start + PAGES_CHUNK) : (start + i)).stream()
+                        .map(url -> taskPool.submit(() -> {
+                            try {
                                 String path = url.getPath().isEmpty() ? "/" : url.getPath();
-                                System.out.println(url);
                                 Connection.Response response = getURLConnection(url);
                                 return new Page(siteEntity, path, response.statusCode(), response.body());
-                            })).peek(TASKS::add).map(task -> {
-                                Page result = task.join();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        })).peek(TASKS::add).map(task -> {
+                            try {
+                                String result = objectMapper.writeValueAsString(task.join());
                                 TASKS.remove(task);
                                 return result;
-                            }).toList()));
-                } catch(CancellationException e) {
-                    throw new CancellationException(IndexError.INTERRUPTED.toString());
-                } catch (JsonProcessingException | RuntimeException e) {
-                    throw new RuntimeException(e);
-                }
+                            } catch (CancellationException e) {
+                                throw new CancellationException(IndexError.INTERRUPTED.toString());
+                            } catch (JsonProcessingException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }).collect(Collectors.joining(",", "[", "]")));
+            } catch (CancellationException e) {
+                throw new CancellationException(IndexError.INTERRUPTED.toString());
+            } catch (RuntimeException e) {
+                throw new RuntimeException(e);
             }
         }
     }
 
-    private List<Lemma> serializeLemmas(Page pageEntity, Set<String> lemmas) {
-        Site site = pageEntity.getSite();
-        synchronized (lemmaBuffer) {
+    private Map<Lemma, Long> serializeLemmas(Page pageEntity) {
+        Site siteEntity = pageEntity.getSite();
+        String text = pageEntity.getContent();
+        Map<String, Long> lemmaMap = splitterEng.orElseThrow().splitTextToLemmas(text);
+        lemmaMap.putAll(splitterRus.orElseThrow().splitTextToLemmas(text));
+        Set<String> lemmas = lemmaMap.keySet();
+        try {
+            List<Lemma> result = new ArrayList<>();
             lemmaBuffer.addAll(lemmaRepository.saveAll(lemmas.stream().filter(x -> lemmaBuffer.stream()
-                            .noneMatch(y -> y.getSite().getId() == site.getId() && y.getLemma().equals(x)))
-                    .map(x -> new Lemma(site, x)).toList()));
+                            .noneMatch(y -> y.getSite().getId() == siteEntity.getId() && y.getLemma().equals(x)))
+                    .map(x -> new Lemma(siteEntity, x)).toList()).stream().peek(result::add).toList());
+            refreshFrequencies(result, 1);
+            return result.stream().map(lemmaEntity -> Map.entry(lemmaEntity, lemmaMap.get(lemmaEntity.getLemma())))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        } catch (CancellationException e) {
+            throw new CancellationException(IndexError.INTERRUPTED.toString());
         }
-        List<Lemma> result = lemmaBuffer.stream()
-                .filter(x -> x.getSite().getId() == site.getId())
-                .filter(x -> lemmas.stream().anyMatch(y -> y.equals(x.getLemma()))).toList();
-        refreshFrequencies(result, 1);
+    }
 
-        return result;
+    private void serializeIndex(Page pageEntity) {
+        try {
+            indexRepository.insertAll(Stream.of(taskPool.submit(() -> serializeLemmas(pageEntity))).peek(TASKS::add)
+                    .flatMap(task -> {
+                        try {
+                            Map<Lemma, Long> result = task.join();
+                            TASKS.remove(task);
+                            return result.entrySet().stream()
+                                    .map(mapEntry -> {
+                                        record index(int page_id, int lemma_id, float rank) {}
+                                        return new index(pageEntity.getId(), mapEntry.getKey().getId(),
+                                                Float.valueOf(mapEntry.getValue()));
+                                    });
+                        } catch (CancellationException e) {
+                            throw new CancellationException(IndexError.INTERRUPTED.toString());
+                        }
+                    }).map(indexEntity -> {
+                        try {
+                            return objectMapper.writeValueAsString(indexEntity);
+                        } catch (JsonProcessingException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).collect(Collectors.joining(",", "[", "]")));
+        } catch (CancellationException e) {
+            throw new CancellationException(IndexError.INTERRUPTED.toString());
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void refreshFrequencies(List<Lemma> lemmas, Integer delta) {
-        synchronized (lemmaRepository) {
             lemmaRepository.updateFrequencies(lemmas, delta);
-        }
     }
 
     private Connection.Response getURLConnection(URI url) throws IOException {
@@ -264,6 +271,6 @@ public class IndexingServiceImpl implements IndexingService  {
     private Map<String, String> getConfigSite(String site_regex) {
         return sites.getSites().stream()
                 .filter(config -> config.getUrl().matches(site_regex))
-                .collect(Collectors.toMap(SitesList.SiteRecord::getUrl, SitesList.SiteRecord::getName));
+                .collect(Collectors.toMap(SiteList.SiteRecord::getUrl, SiteList.SiteRecord::getName));
     }
 }

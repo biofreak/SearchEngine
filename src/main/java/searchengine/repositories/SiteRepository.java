@@ -9,16 +9,17 @@ import org.springframework.transaction.annotation.Transactional;
 import searchengine.model.IndexStatus;
 import searchengine.model.Site;
 
+import java.util.Optional;
+
 @Repository
 public interface SiteRepository extends JpaRepository<Site, Integer> {
 
-    Site findByUrl(String url);
+    Optional<Site> findByUrl(String url);
 
     @Transactional
     @Modifying
     @Query("UPDATE Site SET status = :status, lastError = :error, statusTime = CURRENT_TIMESTAMP WHERE id = :id")
     void updateStatus(@Param("id") Integer id, @Param("status") IndexStatus status, @Param("error") String error);
 
-    @Query("SELECT EXISTS(SELECT 1 FROM Site WHERE status = 'INDEXING')")
-    Boolean isIndexing();
+    Boolean existsByStatusIs(IndexStatus status);
 }

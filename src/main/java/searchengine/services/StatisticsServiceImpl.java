@@ -3,31 +3,22 @@ package searchengine.services;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import searchengine.config.SitesList;
 import searchengine.dto.statistics.DetailedStatisticsItem;
 import searchengine.dto.statistics.StatisticsData;
 import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.dto.statistics.TotalStatistics;
-import searchengine.model.Lemma;
-import searchengine.model.Site;
+import searchengine.model.IndexStatus;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
 
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
-import java.util.TimeZone;
 
 @Service
 @RequiredArgsConstructor
 public class StatisticsServiceImpl implements StatisticsService {
-
-    private final Random random = new Random();
-    private final SitesList sites;
-
     @Autowired
     private final SiteRepository siteRepository;
 
@@ -39,16 +30,9 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public StatisticsResponse getStatistics() {
-        String[] statuses = { "INDEXED", "FAILED", "INDEXING" };
-        String[] errors = {
-                "Ошибка индексации: главная страница сайта не доступна",
-                "Ошибка индексации: сайт не доступен",
-                ""
-        };
-
         TotalStatistics total = new TotalStatistics();
         total.setSites((int) siteRepository.count());
-        total.setIndexing(siteRepository.isIndexing());
+        total.setIndexing(siteRepository.existsByStatusIs(IndexStatus.INDEXING));
 
         List<DetailedStatisticsItem> detailed = new ArrayList<>();
         siteRepository.findAll().forEach(siteEntity -> {

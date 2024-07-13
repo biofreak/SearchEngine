@@ -9,21 +9,21 @@ import org.springframework.transaction.annotation.Transactional;
 import searchengine.model.Index;
 import searchengine.model.Lemma;
 import searchengine.model.Page;
-import searchengine.model.Site;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface IndexRepository extends JpaRepository<Index, Integer> {
     List<Index> findByPage(Page page);
     List<Index> findByLemma(Lemma lemma);
-    Index findByPageAndLemma(Page page, Lemma lemma);
+    Optional<Index> findByPageAndLemma(Page page, Lemma lemma);
 
     @Transactional
     @Modifying
     @Query(value = "INSERT INTO `index` (page_id, lemma_id, `rank`) " +
             "SELECT ind.* FROM JSON_TABLE(:data, '$[*]'" +
-            " COLUMNS (page_id INT PATH '$.page.id', lemma_id INT PATH '$.lemma.id', `rank` FLOAT PATH '$.rank')) ind",
+            " COLUMNS (page_id INT PATH '$.page_id', lemma_id INT PATH '$.lemma_id', `rank` FLOAT PATH '$.rank')) ind",
             nativeQuery = true)
     void insertAll(@Param("data") String data);
 }
