@@ -3,9 +3,10 @@ package searchengine.services;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.gargoylesoftware.htmlunit.BrowserVersion;
+import com.gargoylesoftware.htmlunit.WebClient;
+import com.gargoylesoftware.htmlunit.WebResponse;
 import lombok.RequiredArgsConstructor;
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.config.SiteList;
@@ -49,6 +50,8 @@ public class IndexingServiceImpl implements IndexingService  {
 
     private final Set<Lemma> lemmaBuffer = ConcurrentHashMap.newKeySet();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
+    private final WebClient webClient = new WebClient(BrowserVersion.FIREFOX);
 
     public IndexingResponse fullIndex() {
         IndexingResponse result = new IndexingResponse(true);
@@ -174,8 +177,8 @@ public class IndexingServiceImpl implements IndexingService  {
                         .map(url -> taskPool.submit(() -> {
                             try {
                                 String path = url.getPath().isEmpty() ? "/" : url.getPath();
-                                Connection.Response response = getURLConnection(url);
-                                return new Page(siteEntity, path, response.statusCode(), response.body());
+                                WebResponse response = getURLConnection(url);
+                                return new Page(siteEntity,path,response.getStatusCode(),response.getContentAsString());
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -251,21 +254,12 @@ public class IndexingServiceImpl implements IndexingService  {
             lemmaRepository.updateFrequencies(lemmas, delta);
     }
 
-    private Connection.Response getURLConnection(URI url) throws IOException {
-        return Jsoup.connect(url.toString()).ignoreHttpErrors(true)
-                .userAgent(getConfigAttribute("userAgent"))
-                .referrer(getConfigAttribute("referrer"))
-                .execute();
-    }
-
-    private String getConfigAttribute(String attribute) {
-        Properties props = new Properties();
-        try {
-            props.load(getClass().getResourceAsStream("/application.yaml"));
-            return props.getProperty(attribute);
-        } catch (IOException e) {
-            return "";
-        }
+    private WebResponse getURLConnection(URI url) throws IOException {
+        webClient.getOptions().setCssEnabled(false);
+        webClient.getOptions().setJavaScriptEnabled(false);
+        webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
+        webClient.getOptions().setPrintContentOnFailingStatusCode(false);
+        return webClient.getPage(url.toURL() + "/").getWebResponse();
     }
 
     private Map<String, String> getConfigSite(String site_regex) {
