@@ -30,16 +30,15 @@ public class SiteWalk extends RecursiveTask<Stream<String>> {
         this.BASE_ADDRESS = baseAddress;
     }
 
-    private String getParent(String link) {
-        return link.equals(BASE_ADDRESS) ? link : link.substring(0, link.lastIndexOf("/"));
+    private String stripSlash(String link) {
+        return (link.lastIndexOf("/") == link.length() - 1) ? link.substring(0, link.length() - 1) : link;
     }
 
     private Stream<String> getReferences(Document html, String regex) {
         try {
             return html.select("a[href]").stream()
                     .map(link -> link.attr("href").contains(BASE_ADDRESS) ? link.attr("href") :
-                            (BASE_ADDRESS + link.attr("href").strip()))
-                    .map(link -> (link.lastIndexOf("/") == link.length()-1) ?link.substring(0,link.length()-1):link)
+                            (BASE_ADDRESS + link.attr("href").strip())).map(this::stripSlash)
                     .map(link -> link.contains("?") ? link.substring(0, link.lastIndexOf("?")) : link)
                     .map(link -> link.contains("#") ? link.substring(0, link.lastIndexOf("#")) : link)
                     .filter(link -> !link.isEmpty()).filter(link -> link.matches(regex))
@@ -54,7 +53,7 @@ public class SiteWalk extends RecursiveTask<Stream<String>> {
         try {
             String path = PAGE.getPath();
             String address = BASE_ADDRESS + (path.equals("/") ? "" : path);
-            return getReferences(Jsoup.parse(PAGE.getContent()), getParent(address) + CHILD_REGEX)
+            return getReferences(Jsoup.parse(PAGE.getContent()), BASE_ADDRESS + CHILD_REGEX)
                     .filter(link -> !link.equals(address));
         } catch (CancellationException e) {
             throw new CancellationException(IndexError.INTERRUPTED.toString());

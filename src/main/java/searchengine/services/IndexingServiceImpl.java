@@ -255,6 +255,7 @@ public class IndexingServiceImpl implements IndexingService  {
     }
 
     private WebResponse getURLConnection(URI url) throws IOException {
+        /*System.out.println(url);*/
         webClient.getOptions().setCssEnabled(false);
         webClient.getOptions().setJavaScriptEnabled(false);
         webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
