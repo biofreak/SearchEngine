@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import searchengine.model.Page;
 import searchengine.model.Site;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -16,6 +17,7 @@ public interface PageRepository extends JpaRepository<Page, Integer> {
     Optional<Page> findBySiteAndPath(Site site, String path);
 
     Integer countAllBySite(Site site);
+    Integer countAllBySiteIn(List<Site> siteList);
 
     @Transactional
     @Modifying

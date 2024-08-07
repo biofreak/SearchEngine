@@ -30,5 +30,5 @@ spring:
       platform: mysql
 indexing-settings:
   sites:
-    - url: https://et-cetera.ru/mobile
-      name: Et-Cetera.Ru
+    - url: https://sendel.ru
+      name: Sendel.Ru

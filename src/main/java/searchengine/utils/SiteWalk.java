@@ -1,13 +1,10 @@
 package searchengine.utils;
 
-import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import searchengine.model.IndexError;
 import searchengine.model.Page;
 
-import java.io.IOException;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.CancellationException;

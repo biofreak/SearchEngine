@@ -11,13 +11,13 @@ import searchengine.model.Lemma;
 import searchengine.model.Page;
 
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface IndexRepository extends JpaRepository<Index, Integer> {
     List<Index> findByPage(Page page);
-    List<Index> findByLemma(Lemma lemma);
-    Optional<Index> findByPageAndLemma(Page page, Lemma lemma);
+    List<Index> findAllByLemmaIn(List<Lemma> lemmaList);
+    List<Index> findAllByPageInAndLemmaIn(List<Page> pageList, List<Lemma> lemmaList);
+    List<Index> findAllByPageAndLemmaIn(Page pageEntity, List<Lemma> lemmaList);
 
     @Transactional
     @Modifying

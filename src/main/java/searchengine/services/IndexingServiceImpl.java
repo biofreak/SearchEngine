@@ -146,7 +146,7 @@ public class IndexingServiceImpl implements IndexingService  {
             Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
             Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath()).orElse(null);
             if (pageEntity != null) {
-                refreshFrequencies(indexRepository.findByPage(pageEntity).stream().map(Index::getLemma).toList(),-1);
+                decreaseFrequencies(indexRepository.findByPage(pageEntity).stream().map(Index::getLemma).toList());
                 pageRepository.delete(pageEntity);
             }
             try {
@@ -208,11 +208,12 @@ public class IndexingServiceImpl implements IndexingService  {
         lemmaMap.putAll(splitterRus.orElseThrow().splitTextToLemmas(text));
         Set<String> lemmas = lemmaMap.keySet();
         try {
-            List<Lemma> result = new ArrayList<>();
             lemmaBuffer.addAll(lemmaRepository.saveAll(lemmas.stream().filter(x -> lemmaBuffer.stream()
                             .noneMatch(y -> y.getSite().getId() == siteEntity.getId() && y.getLemma().equals(x)))
-                    .map(x -> new Lemma(siteEntity, x)).toList()).stream().peek(result::add).toList());
-            refreshFrequencies(result, 1);
+                    .map(x -> new Lemma(siteEntity, x)).toList()));
+            List<Lemma> result = lemmaBuffer.stream().filter(x -> lemmas.stream()
+                    .anyMatch(y -> x.getSite().getId() == siteEntity.getId() && x.getLemma().equals(y))).toList();
+            increaseFrequencies(result);
             return result.stream().map(lemmaEntity -> Map.entry(lemmaEntity, lemmaMap.get(lemmaEntity.getLemma())))
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         } catch (CancellationException e) {
@@ -236,9 +237,9 @@ public class IndexingServiceImpl implements IndexingService  {
                         } catch (CancellationException e) {
                             throw new CancellationException(IndexError.INTERRUPTED.toString());
                         }
-                    }).map(indexEntity -> {
+                    }).map(indexRecord -> {
                         try {
-                            return objectMapper.writeValueAsString(indexEntity);
+                            return objectMapper.writeValueAsString(indexRecord);
                         } catch (JsonProcessingException e) {
                             throw new RuntimeException(e);
                         }
@@ -250,12 +251,15 @@ public class IndexingServiceImpl implements IndexingService  {
         }
     }
 
-    private void refreshFrequencies(List<Lemma> lemmas, Integer delta) {
-            lemmaRepository.updateFrequencies(lemmas, delta);
+    private void increaseFrequencies(List<Lemma> lemmas) {
+            lemmaRepository.updateFrequencies(lemmas, 1);
+    }
+
+    private void decreaseFrequencies(List<Lemma> lemmas) {
+        lemmaRepository.updateFrequencies(lemmas, -1);
     }
 
     private WebResponse getURLConnection(URI url) throws IOException {
-        /*System.out.println(url);*/
         webClient.getOptions().setCssEnabled(false);
         webClient.getOptions().setJavaScriptEnabled(false);
         webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
