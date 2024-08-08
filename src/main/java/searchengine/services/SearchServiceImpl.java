@@ -59,10 +59,8 @@ public class SearchServiceImpl implements SearchService {
                 response.setCount(0);
                 response.setData(List.of());
             } else {
-                List<Page> pageList = indexRepository.findAllByLemmaIn(lemmas.get(lemmaList.get(0))).stream()
-                        .map(Index::getPage).toList();
-                for (String lemma : lemmaList.subList(1, lemmaList.size()))
-                    pageList = getPagesFromLemma(lemma, pageList);
+                List<Page> pageList = getPagesFromLemmas(lemmaList, indexRepository
+                        .getPageFromIndexIn(indexRepository.findByLemmaIn(lemmas.get(lemmaList.get(0)))));
                 List<SearchResult> resultList = getResultsFromPages(pageList, offset, limit);
                 response.setCount(pageList.size());
                 response.setData(resultList);
@@ -71,9 +69,10 @@ public class SearchServiceImpl implements SearchService {
         return response;
     }
 
-    private List<Page> getPagesFromLemma(String lemma, List<Page> pageList) {
-        return indexRepository.findAllByPageInAndLemmaIn(pageList, lemmas.get(lemma)).stream()
-                .map(Index::getPage).toList();
+    private List<Page> getPagesFromLemmas(List<String> lemmaList, List<Page> pageList) {
+        return lemmaList.isEmpty() ? pageList : getPagesFromLemmas(lemmaList.subList(1, lemmaList.size()),
+                indexRepository.getPageFromIndexIn(indexRepository.findByPageInAndLemmaIn(pageList,
+                lemmas.get(lemmaList.get(0)))));
     }
 
     private String getSnippetFromContent(String htmlCode, Set<String> lemmaSet) {
@@ -100,9 +99,7 @@ public class SearchServiceImpl implements SearchService {
     private List<String> getLemmasFromQuery(String query, List<Site> siteList) {
         Map<String, Long> lemmaMap = splitToLemmas(query);
         lemmas = lemmaMap.keySet().stream()
-                .map(lemma -> Map.entry(lemma, siteList.stream()
-                        .map(siteEntity -> lemmaRepository.findBySiteAndLemma(siteEntity, lemma).orElse(null))
-                        .filter(Predicate.not(Objects::isNull)).toList()))
+                .map(lemma -> Map.entry(lemma, lemmaRepository.findBySiteInAndLemma(siteList, lemma)))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         int pageTotal = pageRepository.countAllBySiteIn(siteList);
         return lemmaMap.keySet().stream()
@@ -118,7 +115,7 @@ public class SearchServiceImpl implements SearchService {
 
     private List<SearchResult> getResultsFromPages(List<Page> pageList, int offset, int limit) {
         Map<Page, Double> rankMap = pageList.stream().map(pageEntity -> Map.entry(pageEntity,
-                                        indexRepository.findAllByPageAndLemmaIn(pageEntity,
+                                        indexRepository.findByPageInAndLemmaIn(List.of(pageEntity),
                                                         lemmas.values().stream().flatMap(Collection::stream).toList())
                                                 .stream().mapToDouble(Index::getRank).sum()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));

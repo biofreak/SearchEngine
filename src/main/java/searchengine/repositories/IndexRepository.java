@@ -15,9 +15,11 @@ import java.util.List;
 @Repository
 public interface IndexRepository extends JpaRepository<Index, Integer> {
     List<Index> findByPage(Page page);
-    List<Index> findAllByLemmaIn(List<Lemma> lemmaList);
-    List<Index> findAllByPageInAndLemmaIn(List<Page> pageList, List<Lemma> lemmaList);
-    List<Index> findAllByPageAndLemmaIn(Page pageEntity, List<Lemma> lemmaList);
+    List<Index> findByLemmaIn(List<Lemma> lemmaList);
+    List<Index> findByPageInAndLemmaIn(List<Page> pageList, List<Lemma> lemmaList);
+
+    @Query("select ind.page from Index as ind WHERE ind IN :data")
+    List<Page> getPageFromIndexIn(List<Index> data);
 
     @Transactional
     @Modifying
