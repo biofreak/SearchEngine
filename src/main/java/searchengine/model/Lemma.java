@@ -7,8 +7,6 @@ import lombok.NoArgsConstructor;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
 
 import java.io.Serializable;
 
@@ -25,7 +23,6 @@ public class Lemma implements Serializable {
     @ManyToOne(fetch = FetchType.EAGER, cascade = CascadeType.MERGE)
     @JoinColumn(name = "site_id", foreignKey = @ForeignKey(name = "fk_lemma_site"))
     @NonNull
-    @OnDelete(action = OnDeleteAction.CASCADE)
     private Site site;
     @Column(name = "lemma")
     @NonNull

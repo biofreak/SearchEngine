@@ -6,8 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
 
 import java.io.Serializable;
 
@@ -24,12 +22,10 @@ public class Index implements Serializable {
     @ManyToOne(fetch = FetchType.EAGER, cascade = CascadeType.MERGE)
     @JoinColumn(name = "page_id", foreignKey = @ForeignKey(name = "fk_index_page"))
     @NonNull
-    @OnDelete(action = OnDeleteAction.CASCADE)
     private Page page;
     @ManyToOne(fetch = FetchType.EAGER, cascade = CascadeType.MERGE)
     @JoinColumn(name = "lemma_id", foreignKey = @ForeignKey(name = "fk_index_lemma"))
     @NonNull
-    @OnDelete(action = OnDeleteAction.CASCADE)
     private Lemma lemma;
     @Column(name = "rank")
     @NonNull

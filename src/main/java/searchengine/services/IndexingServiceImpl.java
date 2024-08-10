@@ -179,8 +179,8 @@ public class IndexingServiceImpl implements IndexingService  {
                                 String path = url.getPath().isEmpty() ? "/" : url.getPath();
                                 WebResponse response = getURLConnection(url);
                                 return new Page(siteEntity,path,response.getStatusCode(),response.getContentAsString());
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
+                            } catch (RuntimeException e) {
+                                throw new RuntimeException(e.getMessage());
                             }
                         })).peek(TASKS::add).map(task -> {
                             try {
@@ -259,12 +259,16 @@ public class IndexingServiceImpl implements IndexingService  {
         lemmaRepository.updateFrequencies(lemmas, -1);
     }
 
-    private WebResponse getURLConnection(URI url) throws IOException {
+    private WebResponse getURLConnection(URI url) {
         webClient.getOptions().setCssEnabled(false);
         webClient.getOptions().setJavaScriptEnabled(false);
         webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
         webClient.getOptions().setPrintContentOnFailingStatusCode(false);
-        return webClient.getPage(url.toURL() + "/").getWebResponse();
+        try {
+            return webClient.getPage(url.toURL() + "/").getWebResponse();
+        } catch (IOException e) {
+            throw new RuntimeException(e.getMessage());
+        }
     }
 
     private Map<String, String> getConfigSite(String site_regex) {

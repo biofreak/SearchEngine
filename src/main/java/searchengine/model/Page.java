@@ -5,11 +5,11 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import jakarta.persistence.*;
 import jakarta.persistence.Index;
 import lombok.*;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
 
 import javax.validation.constraints.Pattern;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @Entity
@@ -22,10 +22,9 @@ public class Page implements Serializable {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", insertable = false)
     private int id;
-    @ManyToOne(fetch = FetchType.EAGER, cascade = {CascadeType.ALL})
+    @ManyToOne(fetch = FetchType.EAGER, cascade = {CascadeType.MERGE})
     @JoinColumn(name = "site_id", foreignKey = @ForeignKey(name = "fk_page_site"))
     @NonNull
-    @OnDelete(action = OnDeleteAction.CASCADE)
     private Site site;
     @Column(name = "path")
     @NonNull
@@ -37,4 +36,6 @@ public class Page implements Serializable {
     @Column(name = "content", columnDefinition = "mediumtext", nullable = false)
     @NonNull
     private String content;
+    @OneToMany(mappedBy = "page", orphanRemoval = true, cascade = CascadeType.REMOVE)
+    private List<searchengine.model.Index> pages = new ArrayList<>();
 }

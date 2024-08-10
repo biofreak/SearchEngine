@@ -60,7 +60,7 @@ public class SearchServiceImpl implements SearchService {
                 response.setData(List.of());
             } else {
                 List<Page> pageList = getPagesFromLemmas(lemmaList, indexRepository
-                        .getPageFromIndexIn(indexRepository.findByLemmaIn(lemmas.get(lemmaList.get(0)))));
+                        .getPagesFromIndexIn(indexRepository.findByLemmaIn(lemmas.get(lemmaList.get(0)))));
                 List<SearchResult> resultList = getResultsFromPages(pageList, offset, limit);
                 response.setCount(pageList.size());
                 response.setData(resultList);
@@ -71,7 +71,7 @@ public class SearchServiceImpl implements SearchService {
 
     private List<Page> getPagesFromLemmas(List<String> lemmaList, List<Page> pageList) {
         return lemmaList.isEmpty() ? pageList : getPagesFromLemmas(lemmaList.subList(1, lemmaList.size()),
-                indexRepository.getPageFromIndexIn(indexRepository.findByPageInAndLemmaIn(pageList,
+                indexRepository.getPagesFromIndexIn(indexRepository.findByPageInAndLemmaIn(pageList,
                 lemmas.get(lemmaList.get(0)))));
     }
 
