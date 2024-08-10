@@ -36,6 +36,6 @@ public class Page implements Serializable {
     @Column(name = "content", columnDefinition = "mediumtext", nullable = false)
     @NonNull
     private String content;
-    @OneToMany(mappedBy = "page", orphanRemoval = true, cascade = CascadeType.REMOVE)
-    private List<searchengine.model.Index> pages = new ArrayList<>();
+    @OneToMany(fetch = FetchType.EAGER, mappedBy = "page", orphanRemoval = true, cascade = CascadeType.REMOVE)
+    private List<searchengine.model.Index> indices = new ArrayList<>();
 }

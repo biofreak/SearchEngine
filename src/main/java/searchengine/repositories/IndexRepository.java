@@ -13,7 +13,6 @@ import java.util.List;
 
 @Repository
 public interface IndexRepository extends JpaRepository<Index, Integer> {
-    List<Index> findByPage(Page page);
     List<Index> findByLemmaIn(List<Lemma> lemmaList);
     List<Index> findByPageInAndLemmaIn(List<Page> pageList, List<Lemma> lemmaList);
 

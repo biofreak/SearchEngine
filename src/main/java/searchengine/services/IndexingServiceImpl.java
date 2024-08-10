@@ -146,7 +146,7 @@ public class IndexingServiceImpl implements IndexingService  {
             Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
             Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath()).orElse(null);
             if (pageEntity != null) {
-                decreaseFrequencies(indexRepository.findByPage(pageEntity).stream().map(Index::getLemma).toList());
+                decreaseFrequencies(pageEntity.getIndices().stream().map(Index::getLemma).toList());
                 pageRepository.delete(pageEntity);
             }
             try {
