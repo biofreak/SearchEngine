@@ -14,6 +14,8 @@ import org.springframework.data.annotation.LastModifiedDate;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @Entity
@@ -47,4 +49,8 @@ public class Site implements Serializable {
     @Column(name = "name", nullable = false, updatable = false)
     @NonNull
     private String name;
+    @OneToMany(mappedBy = "site", orphanRemoval = true, cascade = CascadeType.REMOVE)
+    private List<Page> pages = new ArrayList<>();
+    @OneToMany(mappedBy = "site", orphanRemoval = true, cascade = CascadeType.REMOVE)
+    private List<Lemma> lemmas = new ArrayList<>();
 }

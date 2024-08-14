@@ -38,6 +38,7 @@ public class IndexingServiceImpl implements IndexingService  {
     private final LemmaRepository lemmaRepository;
     @Autowired
     private final IndexRepository indexRepository;
+
     @Autowired
     private SiteList sites;
     private final int PAGES_CHUNK = 250;
@@ -56,15 +57,14 @@ public class IndexingServiceImpl implements IndexingService  {
     public IndexingResponse fullIndex() {
         IndexingResponse result = new IndexingResponse(true);
         if (!siteRepository.existsByStatusIs(IndexStatus.INDEXING)) {
-            siteRepository.deleteAll();
+            siteRepository.findAll().stream().map(Site::getId).peek(id ->
+                    siteRepository.updateStatus(id, IndexStatus.INDEXING,null)).forEach(siteRepository::deleteById);
             sites.getSites().forEach(config -> TASKS.add(taskPool.submit(() ->{
-                String url = config.getUrl();
-                Site siteEntity = serializeSite(url, config.getName());
+                List<URI> urlBuffer = new ArrayList<>() {{ add(URI.create(config.getUrl())); }};
+                Site siteEntity = serializeSite(urlBuffer.get(0).toString(), config.getName());
                     try {
-                        List<URI> urlBuffer = new ArrayList<>() {{ add(new URI(url)); }};
                         serializePages(siteEntity, urlBuffer);
-                        siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
-                        walkTask(urlBuffer,urlBuffer,siteEntity).filter(Objects::nonNull).map(pageEntity ->
+                        walkTask(urlBuffer, urlBuffer, siteEntity).filter(Objects::nonNull).map(pageEntity ->
                                 taskPool.submit(() -> serializeIndex(pageEntity))).peek(TASKS::add).forEach(task -> {
                                     try {
                                         task.join();
@@ -74,7 +74,7 @@ public class IndexingServiceImpl implements IndexingService  {
                                     }
                                 });
                         siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
-                    } catch (RuntimeException | URISyntaxException e) {
+                    } catch (RuntimeException e) {
                         siteRepository.updateStatus(siteEntity.getId(), IndexStatus.FAILED, e.getMessage());
                     }
             })));
@@ -86,13 +86,11 @@ public class IndexingServiceImpl implements IndexingService  {
     }
 
     public  IndexingResponse stopIndex() {
-        IndexingResponse response = new IndexingResponse(true);
+        IndexingResponse response = new IndexingResponse(false);
 
         if (TASKS.isEmpty()) {
-            response.setResult(false);
             response.setError(IndexError.NOTSTARTED.toString());
         } else if(taskPool.isTerminating()) {
-            response.setResult(false);
             response.setError(IndexError.TERMINATING.toString());
         } else {
             taskPool.shutdownNow();
@@ -102,6 +100,7 @@ public class IndexingServiceImpl implements IndexingService  {
             }
             TASKS.clear();
             taskPool = new ForkJoinPool();
+            response.setResult(true);
         }
 
         return response;
@@ -117,13 +116,7 @@ public class IndexingServiceImpl implements IndexingService  {
                         Stream<String> result = task.join();
                         TASKS.remove(task);
                         return result;
-                    }).distinct().map(link -> {
-                        try {
-                            return new URI(link);
-                        } catch (URISyntaxException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }).toList();
+                    }).distinct().map(URI::create).toList();
             if (children.isEmpty()) {
                 return urlBuffer.stream().map(URI::getPath).map(path -> path.isEmpty() ? "/" : path)
                         .map(path -> pageRepository.findBySiteAndPath(siteEntity, path).orElse(null));
@@ -134,33 +127,33 @@ public class IndexingServiceImpl implements IndexingService  {
         } catch(CancellationException e) {
             throw new CancellationException(IndexError.INTERRUPTED.toString());
         } catch (RuntimeException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(e.getMessage());
         }
     }
 
-    public IndexingResponse addIndex(URI url) {
-        IndexingResponse result = new IndexingResponse(true);
-        Map<String, String> siteConfig = getConfigSite(url.getScheme() + "://" + url.getHost());
-        if (!siteConfig.isEmpty()) {
-            Map.Entry<String, String> configEntry = siteConfig.entrySet().iterator().next();
-            Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
-            Page pageEntity = pageRepository.findBySiteAndPath(siteEntity, url.getPath()).orElse(null);
-            if (pageEntity != null) {
-                decreaseFrequencies(pageEntity.getIndices().stream().map(Index::getLemma).toList());
-                pageRepository.delete(pageEntity);
-            }
-            try {
+    public IndexingResponse addIndex(String link) {
+        IndexingResponse result = new IndexingResponse(false);
+        try {
+            URI url = URI.create(link);
+            String path = url.getPath();
+            Map<String, String> siteConfig = getConfigSite(url.getScheme() + "://" + url.getHost());
+            if (!siteConfig.isEmpty()) {
+                Map.Entry<String, String> configEntry = siteConfig.entrySet().iterator().next();
+                Site siteEntity = serializeSite(configEntry.getKey(), configEntry.getValue());
+                pageRepository.findBySiteAndPath(siteEntity, path).ifPresent(pageEntity -> {
+                    decreaseFrequencies(pageEntity.getIndices().stream().map(Index::getLemma).toList());
+                    pageRepository.delete(pageEntity);
+                });
                 serializePages(siteEntity, List.of(url));
                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXING, null);
-                serializeIndex(Objects.requireNonNull(pageRepository.findBySiteAndPath(siteEntity, url.getPath())
-                        .orElse(null)));
+                pageRepository.findBySiteAndPath(siteEntity, path).ifPresent(this::serializeIndex);
                 siteRepository.updateStatus(siteEntity.getId(), IndexStatus.INDEXED, null);
-            } catch(RuntimeException e) {
-                throw new RuntimeException(e);
+                result.setResult(true);
+            } else {
+                result.setError(IndexError.PAGE_OUT_OF_CONFIG.toString());
             }
-        } else {
-            result.setResult(false);
-            result.setError(IndexError.PAGE_OUT_OF_CONFIG.toString());
+        } catch (RuntimeException e) {
+            result.setError(e.getMessage());
         }
         return result;
     }
@@ -169,7 +162,7 @@ public class IndexingServiceImpl implements IndexingService  {
             return siteRepository.findByUrl(url).orElseGet(() -> siteRepository.saveAndFlush(new Site(url, name)));
     }
 
-    protected void serializePages(Site siteEntity, List<URI> urlList) {
+    private void serializePages(Site siteEntity, List<URI> urlList) {
         int i = urlList.size() % PAGES_CHUNK, j = (urlList.size() - i) / PAGES_CHUNK;
         for (int k = 0, start = 0; k <= j; k++, start = k * PAGES_CHUNK) {
             try {
@@ -196,18 +189,18 @@ public class IndexingServiceImpl implements IndexingService  {
             } catch (CancellationException e) {
                 throw new CancellationException(IndexError.INTERRUPTED.toString());
             } catch (RuntimeException e) {
-                throw new RuntimeException(e);
+                throw new RuntimeException(e.getMessage());
             }
         }
     }
 
     private Map<Lemma, Long> serializeLemmas(Page pageEntity) {
-        Site siteEntity = pageEntity.getSite();
-        String text = pageEntity.getContent();
-        Map<String, Long> lemmaMap = splitterEng.orElseThrow().splitTextToLemmas(text);
-        lemmaMap.putAll(splitterRus.orElseThrow().splitTextToLemmas(text));
-        Set<String> lemmas = lemmaMap.keySet();
         try {
+            Site siteEntity = pageEntity.getSite();
+            String text = pageEntity.getContent();
+            Map<String, Long> lemmaMap = splitterEng.orElseThrow().splitTextToLemmas(text);
+            lemmaMap.putAll(splitterRus.orElseThrow().splitTextToLemmas(text));
+            Set<String> lemmas = lemmaMap.keySet();
             lemmaBuffer.addAll(lemmaRepository.saveAll(lemmas.stream().filter(x -> lemmaBuffer.stream()
                             .noneMatch(y -> y.getSite().getId() == siteEntity.getId() && y.getLemma().equals(x)))
                     .map(x -> new Lemma(siteEntity, x)).toList()));
@@ -241,13 +234,13 @@ public class IndexingServiceImpl implements IndexingService  {
                         try {
                             return objectMapper.writeValueAsString(indexRecord);
                         } catch (JsonProcessingException e) {
-                            throw new RuntimeException(e);
+                            throw new RuntimeException(e.getMessage());
                         }
                     }).collect(Collectors.joining(",", "[", "]")));
         } catch (CancellationException e) {
             throw new CancellationException(IndexError.INTERRUPTED.toString());
         } catch (RuntimeException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(e.getMessage());
         }
     }
 

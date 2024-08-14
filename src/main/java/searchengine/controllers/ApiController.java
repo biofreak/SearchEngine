@@ -1,18 +1,14 @@
 package searchengine.controllers;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import searchengine.dto.indexing.IndexingResponse;
 import searchengine.dto.searching.SearchResponse;
 import searchengine.dto.statistics.StatisticsResponse;
-import searchengine.model.IndexError;
 import searchengine.services.IndexingService;
 import searchengine.services.SearchService;
 import searchengine.services.StatisticsService;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Optional;
 
 @RestController
@@ -52,14 +48,8 @@ public class ApiController {
 
     @PostMapping("/indexPage")
     @ResponseBody
-    public ResponseEntity<IndexingResponse> indexPage(@RequestParam(name = "url") String url) {
-        try {
-            return ResponseEntity.ok(indexingService.addIndex(new URI(url)));
-        } catch (URISyntaxException e) {
-            IndexingResponse response = new IndexingResponse(false);
-            response.setError(IndexError.URL_FORMAT.toString());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
-        }
+    public ResponseEntity<IndexingResponse> indexPage(@RequestParam(name = "url") String link) {
+        return ResponseEntity.ok(indexingService.addIndex(link));
     }
 
     @GetMapping("/search")
