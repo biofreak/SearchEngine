@@ -11,6 +11,10 @@ spring:
     password: "root"
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/search_engine
+    hikari:
+      data-source-properties:
+        rewriteBatchedStatements: true
+
   jpa:
     open-in-view: false
     hibernate:
